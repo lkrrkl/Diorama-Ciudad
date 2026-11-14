@@ -355,6 +355,7 @@ let selItemIdx=-1,placing=true,selFw=null,selFd=null;
 let animT=0,needsAnim=false,needsAnim2=false,lastDrawA=0,lastDrawB=0;
 let outside=false;
 let ghostArmed=false;
+let ghostCell=null;   // <-- ANCLA persistente del fantasma (sobrevive a pointerleave/up)
 const cam={zoom:1,panX:0,panY:0};
 const cam2={zoom:1,panX:0,panY:0};
 try{lib=JSON.parse(localStorage.getItem('dioCR')||'[]');slots=JSON.parse(localStorage.getItem('dioSl')||'null')||slots;Object.assign(FX,JSON.parse(localStorage.getItem('dioFX')||'{}'))}catch(e){}
@@ -380,9 +381,7 @@ function poly(p,f,s,lw){const c=G.c;c.beginPath();p.forEach((q,i)=>i?c.lineTo(q[
 const gpoly=(x0,y0,x1,y1,f,s)=>poly([PW(x0,y0),PW(x1,y0),PW(x1,y1),PW(x0,y1)],f,s);
 function groundCircle(cx,cy,r,f,s){ const pts=[];for(let i=0;i<20;i++){const a=i/20*Math.PI*2;pts.push(PW(cx+Math.cos(a)*r,cy+Math.sin(a)*r))} poly(pts,f,s,1.2); }
 
-/* ============================================================
-   GLOW — AHORA SOPORTA HEX, hsl() y rgb()
-   ============================================================ */
+/* sglow soporta hex, hsl() y rgb()/rgba() */
 function sglow(x,y,col,r,a,ys=.5){
   const c=G.c;
   c.save();
@@ -390,51 +389,29 @@ function sglow(x,y,col,r,a,ys=.5){
   c.translate(x,y);
   c.scale(1,ys);
   const g=c.createRadialGradient(0,0,0,0,0,r);
-
-  // Alpha: 'aa' (hex) → 0.667 ; si ya es número, úsalo tal cual
   let alpha = 1;
   if(typeof a === 'string' && /^[0-9a-fA-F]{2}$/.test(a)) alpha = parseInt(a,16)/255;
   else if(typeof a === 'number') alpha = a;
-
   let col0, col1;
   if(col && col.startsWith('#')){
-    // Hex: concatenar sufijo hex para stop0, '00' para stop1
-    col0 = col + a;
-    col1 = col + '00';
+    col0 = col + a; col1 = col + '00';
   } else if(typeof col === 'string' && /^\s*hsl/i.test(col)){
-    // hsl(...) → hsla(..., alpha)
     const base = col.trim().replace(/^hsl/i, 'hsla');
     col0 = base.replace(/\)\s*$/, `, ${alpha})`);
     col1 = base.replace(/\)\s*$/, `, 0)`);
   } else if(typeof col === 'string' && /^\s*rgb/i.test(col)){
-    // rgb(...) → rgba(..., alpha)   |   rgba(...) → forzar alpha
     const base = col.trim().replace(/^rgb/i, 'rgba');
-    if(/^rgba\s*\(/i.test(base) && base.includes(',')){
-      // ya tiene alpha: reemplazar el último componente
+    if(/^rgba\s*\(/i.test(base)){
       col0 = base.replace(/,\s*[^,]+\)\s*$/, `, ${alpha})`);
       col1 = base.replace(/,\s*[^,]+\)\s*$/, ', 0)');
     } else {
       col0 = base.replace(/\)\s*$/, `, ${alpha})`);
       col1 = base.replace(/\)\s*$/, ', 0)');
     }
-  } else {
-    // Fallback: asumir hex o color CSS con alpha no estandar → usa string tal cual
-    col0 = col; col1 = col;
-  }
-
-  try{
-    g.addColorStop(0, col0);
-    g.addColorStop(1, col1);
-  }catch(err){
-    // Ante cualquier color inválido, pintar transparente y no abortar
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-  }
-
-  c.fillStyle = g;
-  c.beginPath();
-  c.arc(0,0,r,0,7);
-  c.fill();
+  } else { col0 = col; col1 = col; }
+  try{ g.addColorStop(0,col0); g.addColorStop(1,col1); }
+  catch(_){ g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,0)'); }
+  c.fillStyle=g;c.beginPath();c.arc(0,0,r,0,7);c.fill();
   c.restore();
 }
 
@@ -1364,7 +1341,6 @@ function obj0(it){
       }
       const g1 = P(B.rx0, B.ry1, zBot), g3 = P(B.rx1, B.ry1, zTop);
       const ccx = (g1[0]+g3[0])/2, ccy = (g1[1]+g3[1])/2;
-      // sglow ahora acepta hsl() sin problemas
       sglow(ccx, ccy, `hsl(${hue|0}, 95%, 65%)`, 42*G.sc*(0.6+pulse*0.6), 'aa', 1);
     } else {
       const g1=P(B.rx0,B.ry1,zBot),g2=P(B.rx1,B.ry1,zBot),g3=P(B.rx1,B.ry1,zTop),g4=P(B.rx0,B.ry1,zTop);
@@ -1965,17 +1941,20 @@ function fits(t,x,y,rotn,items,fw,fd,excludeIdx=-1){
     return x<o.x+ow&&x+w>o.x&&y<o.y+od&&y+d>o.y;
   });
 }
+
+/* ==== ghostAt: usa ghostCell (ancla persistente) primero ==== */
 function ghostAt(){
   if(!placing)return null;
   const T=TYPES[selType],fw=selFw??T.w,fd=selFd??T.d;
   const[w,d]=dims({t:selType,rot:prot,fw,fd});
   let gx,gy;
-  if(outside||!hover){
+  const anchor = ghostCell || hover;
+  if(anchor){
+    gx=anchor[0]-Math.floor(w/2);
+    gy=anchor[1]-Math.floor(d/2);
+  } else {
     gx=Math.max(0,Math.floor((12-w)/2));
     gy=Math.max(0,Math.floor((12-d)/2));
-  } else {
-    gx=hover[0]-Math.floor(w/2);
-    gy=hover[1]-Math.floor(d/2);
   }
   return{t:selType,rot:prot,h:selH,fw,fd,x:gx,y:gy};
 }
@@ -2041,12 +2020,14 @@ function toHex(c){
   return '#000000';
 }
 
+/* ==== placeGhost: coloca en la posición anclada y limpia ghostCell ==== */
 function placeGhost(){
   const g=ghostAt();
   if(g&&fits(g.t,g.x,g.y,g.rot,cur.items,g.fw,g.fd)){
     cur.items.push({t:g.t,x:g.x,y:g.y,rot:g.rot,h:g.h,fw:g.fw,fd:g.fd,
                     wallMaterial:getMaterial(g,TYPES[g.t]),_t0:Date.now()});
     refreshAnim();
+    ghostCell=null;   // listo para el siguiente
     return true;
   }
   return false;
@@ -2083,6 +2064,7 @@ cv.addEventListener('pointerdown',e=>{
 
   if(idx>=0 && mode!=='erase'){
     ghostArmed=false;
+    ghostCell=null;
     selectItem(idx);
     dragItem={idx,offX:cell[0]-cur.items[idx].x,offY:cell[1]-cur.items[idx].y,startX:e.clientX,startY:e.clientY,moved:false};
     draw();
@@ -2097,14 +2079,18 @@ cv.addEventListener('pointerdown',e=>{
       dragCam={x:e.clientX,y:e.clientY,panX:cam.panX,panY:cam.panY,moved:false};
       return;
     }
+    // Touch
     if(ghostArmed){
+      // 2º toque: coloca en la posición del ghostCell (última ubicación arrastrada)
       const ok=placeGhost();
       if(ok) ghostArmed=false;
       draw();
       return;
     }
+    // 1er toque: anclar el fantasma aquí
     outside=false;
     hover=cell;
+    ghostCell=cell;   // <-- ancla persistente
     touchPlaceStart={x:e.clientX,y:e.clientY,moved:false};
     draw();
     return;
@@ -2136,7 +2122,9 @@ cv.addEventListener('pointermove',e=>{
       const dy=e.clientY-touchPlaceStart.y;
       if(Math.abs(dx)>3||Math.abs(dy)>3) touchPlaceStart.moved=true;
       outside=false;
-      hover=cellAt(e);
+      const cNow=cellAt(e);
+      hover=cNow;
+      ghostCell=cNow;   // <-- el fantasma sigue el dedo y queda anclado aquí
       draw();
       return;
     }
@@ -2167,8 +2155,11 @@ cv.addEventListener('pointermove',e=>{
       return;
     }
   }
+  // Hover libre (ratón)
   outside=false;
-  hover=cellAt(e);
+  const cNow=cellAt(e);
+  hover=cNow;
+  ghostCell=cNow;   // <-- también lo ancla para el flujo de ratón
   draw();
 });
 
@@ -2178,6 +2169,7 @@ cv.addEventListener('pointerup',e=>{
   if(pinchStart){ if(activePointers.size<2) pinchStart=null; return; }
 
   if(touchPlaceStart){
+    // El dedo se levanta: el fantasma queda anclado en ghostCell (no lo tocamos)
     touchPlaceStart=null;
     ghostArmed=true;
     draw();
@@ -2190,8 +2182,9 @@ cv.addEventListener('pointerup',e=>{
     const wasDrag=dragCam.moved;
     dragCam=null;
     if(!wasDrag && activePointers.size===0){
-      hover=cellAt(e);
-      handleClick(hover);
+      const cNow=cellAt(e);
+      hover=cNow;
+      handleClick(cNow);
     }
     return;
   }
@@ -2203,9 +2196,11 @@ cv.addEventListener('pointercancel',e=>{
   dragCam=null;dragItem=null;touchPlaceStart=null;
 });
 
-cv.addEventListener('pointerleave',()=>{
+cv.addEventListener('pointerleave',e=>{
   if(activePointers.size>0||dragItem||dragCam||touchPlaceStart)return;
-  outside=true;hover=null;
+  hover=null;
+  // Solo limpiamos ghostCell si viene del ratón. En touch se conserva el ancla.
+  if(e.pointerType==='mouse') ghostCell=null;
   if(placing)draw();
 });
 cv.addEventListener('pointerenter',()=>{outside=false});
@@ -2241,12 +2236,14 @@ function handleClick(cell){
   }
   if(idx>=0){selectItem(idx);draw();return}
   if(mode=='place'&&placing){
+    ghostCell=cell;   // asegurar que coloca en la celda del clic
     const g=ghostAt();
     if(g&&fits(g.t,g.x,g.y,g.rot,cur.items,g.fw,g.fd)){
       cur.items.push({t:g.t,x:g.x,y:g.y,rot:g.rot,h:g.h,fw:g.fw,fd:g.fd,
                       wallMaterial:getMaterial(g,TYPES[g.t]),_t0:Date.now()});
       refreshAnim();
     }
+    ghostCell=null;
     selectItem(-1);draw();
   }else{
     selectItem(-1);draw();
@@ -2273,12 +2270,10 @@ function genTypeThumb(typeIdx){
 
   const item={t:typeIdx,x:(S-T.w)/2,y:(S-T.d)/2,rot:0,h:T.h};
 
-  // try/catch por si algún tipo futuro introduce un color inválido — NO detiene la generación
   try{
     render([item],{noAnim:true});
   }catch(err){
     console.warn('Thumb falló para type', typeIdx, T.n, err);
-    // Fallback: fondo con el color de pared del tipo
     const ctx = c.getContext('2d');
     ctx.fillStyle = T.wall || '#333';
     ctx.fillRect(0,0,c.width,c.height);
@@ -2335,7 +2330,9 @@ function renderPicker(){
       btn.appendChild(label);
       btn.onclick=()=>{
         selType=i;selH=t.h;selFw=null;selFd=null;
-        placing=true;mode='place';ghostArmed=false;hover=null;
+        placing=true;mode='place';ghostArmed=false;
+        ghostCell=null;  // <-- reiniciar ancla al cambiar de tipo
+        hover=null;
         $('tber').classList.remove('on');
         selectItem(-1);
         closePicker();
@@ -2370,7 +2367,7 @@ $('selmode').onchange=()=>{if(selItemIdx>=0){cur.items[selItemIdx].signMode=$('s
 $('selroadc').oninput=()=>{if(selItemIdx>=0){cur.items[selItemIdx].roadColor=$('selroadc').value;draw()}};
 $('selhp').onclick=()=>{if(selItemIdx>=0){const it=cur.items[selItemIdx],T=TYPES[it.t];it.h=Math.min(T.hmax,(it.h||T.h)+.5);draw()}};
 $('selhm').onclick=()=>{if(selItemIdx>=0){const it=cur.items[selItemIdx],T=TYPES[it.t];it.h=Math.max(T.hmin,(it.h||T.h)-.5);draw()}};
-$('seldel').onclick=()=>{if(selItemIdx>=0){cur.items.splice(selItemIdx,1);selectItem(-1);refreshAnim();draw()}};
+$('seldel').onclick=()=>{if(selItemIdx>=0){cur.items.splice(selItemIdx,1);selectItem(-1);ghostCell=null;ghostArmed=false;refreshAnim();draw()}};
 
 $('tbrot').onclick=()=>{
   if(selItemIdx>=0){cur.items[selItemIdx].rot=(cur.items[selItemIdx].rot+1)%4;draw()}
@@ -2389,11 +2386,19 @@ $('tbq-').onclick=()=>{
   if(selItemIdx>=0){const it=cur.items[selItemIdx],T=TYPES[it.t];it.fw=Math.max(1,(it.fw||T.w)-1);it.fd=Math.max(1,(it.fd||T.d)-1);refreshAnim();draw()}
   else{const T=TYPES[selType];selFw=Math.max(1,(selFw??T.w)-1);selFd=Math.max(1,(selFd??T.d)-1);draw()}
 };
-$('tber').onclick=()=>{mode=mode=='erase'?'place':'erase';ghostArmed=false;$('tber').classList.toggle('on',mode=='erase');draw()};
+$('tber').onclick=()=>{
+  mode=mode=='erase'?'place':'erase';
+  ghostArmed=false;
+  ghostCell=null;
+  $('tber').classList.toggle('on',mode=='erase');
+  draw();
+};
 $('tbclr').onclick=()=>{
   if(cur.items.length===0)return;
   if(!confirm('⚠ ¿Estás seguro de eliminar TODO lo que hay en el diorama?'))return;
-  cur.items=[];selectItem(-1);refreshAnim();draw();
+  cur.items=[];selectItem(-1);
+  ghostArmed=false;ghostCell=null;
+  refreshAnim();draw();
 };
 
 document.querySelectorAll('.fxb').forEach(b=>{
@@ -2412,7 +2417,11 @@ addEventListener('keydown',e=>{
   if(e.target.tagName=='INPUT'||e.target.tagName=='SELECT'||$('v1').hidden)return;
   const k=e.key.toLowerCase();
   if(k=='r')$('tbrot').click();
-  else if(k=='escape'){placing=false;mode='place';ghostArmed=false;selectItem(-1);$('tber').classList.remove('on');draw()}
+  else if(k=='escape'){
+    placing=false;mode='place';
+    ghostArmed=false;ghostCell=null;
+    selectItem(-1);$('tber').classList.remove('on');draw();
+  }
 });
 
 function thumb(items){
@@ -2442,7 +2451,9 @@ $('bload').onclick=()=>openLoad();
 $('bnew').onclick=()=>{
   if(cur.items.length>0 && !confirm('⚠ Si no has guardado el diorama actual, se perderá. ¿Crear un nuevo diorama?'))return;
   cur={items:[],id:null};
-  $('nm').value='';selectItem(-1);ghostArmed=false;refreshAnim();draw();
+  $('nm').value='';selectItem(-1);
+  ghostArmed=false;ghostCell=null;
+  refreshAnim();draw();
 };
 
 function openLoad(){
@@ -2459,7 +2470,9 @@ function openLoad(){
         const now=Date.now();
         cur={items:JSON.parse(JSON.stringify(d.items)).map(o=>({...o,_t0:o._t0||now})),id:d.id};
         $('nm').value=d.name;
-        selectItem(-1);ghostArmed=false;refreshAnim();
+        selectItem(-1);
+        ghostArmed=false;ghostCell=null;
+        refreshAnim();
         $('loadmodal').hidden=true;
         draw();
       };
@@ -2482,7 +2495,13 @@ function cards(host,pick){
     else{
       const s=document.createElement('span'),a=document.createElement('button'),x=document.createElement('button');
       a.textContent='Editar';x.textContent='🗑';
-      a.onclick=()=>{cur={items:JSON.parse(JSON.stringify(d.items)),id:d.id};$('nm').value=d.name;selectItem(-1);ghostArmed=false;refreshAnim();draw()};
+      a.onclick=()=>{
+        cur={items:JSON.parse(JSON.stringify(d.items)),id:d.id};
+        $('nm').value=d.name;
+        selectItem(-1);
+        ghostArmed=false;ghostCell=null;
+        refreshAnim();draw();
+      };
       x.onclick=()=>{if(!confirm('¿Eliminar "'+d.name+'"?'))return;lib=lib.filter(o=>o.id!=d.id);slots=slots.map(s=>s==d.id?null:s);persist();all()};
       s.append(a,x);e.append(s);
     }
