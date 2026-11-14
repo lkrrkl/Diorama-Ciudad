@@ -354,7 +354,7 @@ let G,EG,view=0,cview=0,selType=0,prot=0,mode='place',hover=null,cur={items:[],i
 let selItemIdx=-1,placing=true,selFw=null,selFd=null;
 let animT=0,needsAnim=false,needsAnim2=false,lastDrawA=0,lastDrawB=0;
 let outside=false;
-let ghostArmed=false;   // TOUCH: primer toque posiciona, segundo toque coloca
+let ghostArmed=false;
 const cam={zoom:1,panX:0,panY:0};
 const cam2={zoom:1,panX:0,panY:0};
 try{lib=JSON.parse(localStorage.getItem('dioCR')||'[]');slots=JSON.parse(localStorage.getItem('dioSl')||'null')||slots;Object.assign(FX,JSON.parse(localStorage.getItem('dioFX')||'{}'))}catch(e){}
@@ -379,7 +379,65 @@ const PW=(x,y,z=0)=>{const a=rot(x,y);return P(a[0],a[1],z)};
 function poly(p,f,s,lw){const c=G.c;c.beginPath();p.forEach((q,i)=>i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]));c.closePath();if(f){c.fillStyle=f;c.fill()}if(s){c.strokeStyle=s;c.lineWidth=lw||1;c.stroke()}}
 const gpoly=(x0,y0,x1,y1,f,s)=>poly([PW(x0,y0),PW(x1,y0),PW(x1,y1),PW(x0,y1)],f,s);
 function groundCircle(cx,cy,r,f,s){ const pts=[];for(let i=0;i<20;i++){const a=i/20*Math.PI*2;pts.push(PW(cx+Math.cos(a)*r,cy+Math.sin(a)*r))} poly(pts,f,s,1.2); }
-function sglow(x,y,col,r,a,ys=.5){const c=G.c;c.save();c.globalCompositeOperation='lighter';c.translate(x,y);c.scale(1,ys);const g=c.createRadialGradient(0,0,0,0,0,r);g.addColorStop(0,col+a);g.addColorStop(1,col+'00');c.fillStyle=g;c.beginPath();c.arc(0,0,r,0,7);c.fill();c.restore()}
+
+/* ============================================================
+   GLOW — AHORA SOPORTA HEX, hsl() y rgb()
+   ============================================================ */
+function sglow(x,y,col,r,a,ys=.5){
+  const c=G.c;
+  c.save();
+  c.globalCompositeOperation='lighter';
+  c.translate(x,y);
+  c.scale(1,ys);
+  const g=c.createRadialGradient(0,0,0,0,0,r);
+
+  // Alpha: 'aa' (hex) → 0.667 ; si ya es número, úsalo tal cual
+  let alpha = 1;
+  if(typeof a === 'string' && /^[0-9a-fA-F]{2}$/.test(a)) alpha = parseInt(a,16)/255;
+  else if(typeof a === 'number') alpha = a;
+
+  let col0, col1;
+  if(col && col.startsWith('#')){
+    // Hex: concatenar sufijo hex para stop0, '00' para stop1
+    col0 = col + a;
+    col1 = col + '00';
+  } else if(typeof col === 'string' && /^\s*hsl/i.test(col)){
+    // hsl(...) → hsla(..., alpha)
+    const base = col.trim().replace(/^hsl/i, 'hsla');
+    col0 = base.replace(/\)\s*$/, `, ${alpha})`);
+    col1 = base.replace(/\)\s*$/, `, 0)`);
+  } else if(typeof col === 'string' && /^\s*rgb/i.test(col)){
+    // rgb(...) → rgba(..., alpha)   |   rgba(...) → forzar alpha
+    const base = col.trim().replace(/^rgb/i, 'rgba');
+    if(/^rgba\s*\(/i.test(base) && base.includes(',')){
+      // ya tiene alpha: reemplazar el último componente
+      col0 = base.replace(/,\s*[^,]+\)\s*$/, `, ${alpha})`);
+      col1 = base.replace(/,\s*[^,]+\)\s*$/, ', 0)');
+    } else {
+      col0 = base.replace(/\)\s*$/, `, ${alpha})`);
+      col1 = base.replace(/\)\s*$/, ', 0)');
+    }
+  } else {
+    // Fallback: asumir hex o color CSS con alpha no estandar → usa string tal cual
+    col0 = col; col1 = col;
+  }
+
+  try{
+    g.addColorStop(0, col0);
+    g.addColorStop(1, col1);
+  }catch(err){
+    // Ante cualquier color inválido, pintar transparente y no abortar
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+  }
+
+  c.fillStyle = g;
+  c.beginPath();
+  c.arc(0,0,r,0,7);
+  c.fill();
+  c.restore();
+}
+
 function box(x0,y0,x1,y1,z0,z1,cl,cr,ct,st){
   const a=rot(x0,y0),b=rot(x1,y1),B={rx0:Math.min(a[0],b[0]),rx1:Math.max(a[0],b[0]),ry0:Math.min(a[1],b[1]),ry1:Math.max(a[1],b[1])};
   poly([P(B.rx0,B.ry1,z0),P(B.rx1,B.ry1,z0),P(B.rx1,B.ry1,z1),P(B.rx0,B.ry1,z1)],cl);
@@ -1306,6 +1364,7 @@ function obj0(it){
       }
       const g1 = P(B.rx0, B.ry1, zBot), g3 = P(B.rx1, B.ry1, zTop);
       const ccx = (g1[0]+g3[0])/2, ccy = (g1[1]+g3[1])/2;
+      // sglow ahora acepta hsl() sin problemas
       sglow(ccx, ccy, `hsl(${hue|0}, 95%, 65%)`, 42*G.sc*(0.6+pulse*0.6), 'aa', 1);
     } else {
       const g1=P(B.rx0,B.ry1,zBot),g2=P(B.rx1,B.ry1,zBot),g3=P(B.rx1,B.ry1,zTop),g4=P(B.rx0,B.ry1,zTop);
@@ -1982,7 +2041,6 @@ function toHex(c){
   return '#000000';
 }
 
-/* Colocar el fantasma en la posición actual (touch) */
 function placeGhost(){
   const g=ghostAt();
   if(g&&fits(g.t,g.x,g.y,g.rot,cur.items,g.fw,g.fd)){
@@ -1994,7 +2052,7 @@ function placeGhost(){
   return false;
 }
 
-/* --------- POINTERS con PINCH-ZOOM y colocar en dos pasos --------- */
+/* --------- POINTERS --------- */
 let dragCam=null, dragItem=null, touchPlaceStart=null;
 const activePointers=new Map();
 let pinchStart=null;
@@ -2004,7 +2062,6 @@ cv.addEventListener('pointerdown',e=>{
   activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   try{cv.setPointerCapture(e.pointerId)}catch(_){}
 
-  // Pinch (2 dedos)
   if(activePointers.size===2){
     dragCam=null;dragItem=null;touchPlaceStart=null;
     const [p1,p2]=[...activePointers.values()];
@@ -2024,7 +2081,6 @@ cv.addEventListener('pointerdown',e=>{
   const cell=cellAt(e);
   const idx=itemAt(cell[0],cell[1]);
 
-  // Arrastrar edificio existente (todos los modos menos erase)
   if(idx>=0 && mode!=='erase'){
     ghostArmed=false;
     selectItem(idx);
@@ -2032,37 +2088,27 @@ cv.addEventListener('pointerdown',e=>{
     draw();
     return;
   }
-
-  // Modo borrar: arrastrar cámara y al soltar sin mover borra
   if(mode==='erase'){
     dragCam={x:e.clientX,y:e.clientY,panX:cam.panX,panY:cam.panY,moved:false};
     return;
   }
-
-  // Modo colocar
   if(mode==='place' && placing){
     if(e.pointerType==='mouse'){
-      // Ratón: 1 clic coloca (usa hover existente)
       dragCam={x:e.clientX,y:e.clientY,panX:cam.panX,panY:cam.panY,moved:false};
       return;
     }
-    // Touch: dos pasos
     if(ghostArmed){
-      // 2º toque: colocar en la posición actual del fantasma (hover)
       const ok=placeGhost();
       if(ok) ghostArmed=false;
       draw();
       return;
     }
-    // 1er toque: posicionar fantasma
     outside=false;
     hover=cell;
     touchPlaceStart={x:e.clientX,y:e.clientY,moved:false};
     draw();
     return;
   }
-
-  // Sin colocación: arrastrar cámara
   dragCam={x:e.clientX,y:e.clientY,panX:cam.panX,panY:cam.panY,moved:false};
 });
 
@@ -2132,9 +2178,7 @@ cv.addEventListener('pointerup',e=>{
   if(pinchStart){ if(activePointers.size<2) pinchStart=null; return; }
 
   if(touchPlaceStart){
-    const moved=touchPlaceStart.moved;
     touchPlaceStart=null;
-    // En ambos casos, el fantasma queda posicionado y armado
     ghostArmed=true;
     draw();
     return;
@@ -2147,7 +2191,6 @@ cv.addEventListener('pointerup',e=>{
     dragCam=null;
     if(!wasDrag && activePointers.size===0){
       hover=cellAt(e);
-      // Ratón o modo borrar: handleClick coloca/borra
       handleClick(hover);
     }
     return;
@@ -2220,17 +2263,29 @@ function genTypeThumb(typeIdx){
   const c=document.createElement('canvas');
   c.width=140;c.height=140;
 
-  // S ajustado: tipos planos usan casi todo el marco; edificios dejan aire para la altura
   const isFlat = T.h === 0;
   const S = isFlat
     ? Math.max(T.w, T.d) + 0.3
     : Math.max(T.w+0.5, T.d+0.5, (T.hmax||T.h)*0.75) + 0.4;
 
   setup(c.getContext('2d'), S, 0, 1, 0, 0);
-  showGrid = !isFlat;   // sin rejilla para calles/vías → se ven mejor
+  showGrid = !isFlat;
 
   const item={t:typeIdx,x:(S-T.w)/2,y:(S-T.d)/2,rot:0,h:T.h};
-  render([item],{noAnim:true});
+
+  // try/catch por si algún tipo futuro introduce un color inválido — NO detiene la generación
+  try{
+    render([item],{noAnim:true});
+  }catch(err){
+    console.warn('Thumb falló para type', typeIdx, T.n, err);
+    // Fallback: fondo con el color de pared del tipo
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = T.wall || '#333';
+    ctx.fillRect(0,0,c.width,c.height);
+    ctx.strokeStyle = T.neon || '#00f0ff';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(6,6,c.width-12,c.height-12);
+  }
 
   G=keepG;needsAnim=keepNeeds;animT=keepAnimT;TICK=keepTICK;showGrid=keepGrid;
   typeThumbCache[typeIdx]=c.toDataURL('image/png');
@@ -2273,7 +2328,7 @@ function renderPicker(){
       btn.className='picker-item'+(i===selType&&mode==='place'?' on':'');
       const img=document.createElement('img');
       img.alt=t.n;
-      img.src=genTypeThumb(i);
+      try{ img.src=genTypeThumb(i); }catch(_){ img.src='data:image/gif;base64,R0lGODlhAQABAAAAACw='; }
       const label=document.createElement('b');
       label.textContent=t.n;
       btn.appendChild(img);
