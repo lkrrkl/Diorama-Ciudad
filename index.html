@@ -355,7 +355,7 @@ let selItemIdx=-1,placing=true,selFw=null,selFd=null;
 let animT=0,needsAnim=false,needsAnim2=false,lastDrawA=0,lastDrawB=0;
 let outside=false;
 let ghostArmed=false;
-let ghostCell=null;   // <-- ANCLA persistente del fantasma (sobrevive a pointerleave/up)
+let ghostCell=null;
 const cam={zoom:1,panX:0,panY:0};
 const cam2={zoom:1,panX:0,panY:0};
 try{lib=JSON.parse(localStorage.getItem('dioCR')||'[]');slots=JSON.parse(localStorage.getItem('dioSl')||'null')||slots;Object.assign(FX,JSON.parse(localStorage.getItem('dioFX')||'{}'))}catch(e){}
@@ -381,7 +381,7 @@ function poly(p,f,s,lw){const c=G.c;c.beginPath();p.forEach((q,i)=>i?c.lineTo(q[
 const gpoly=(x0,y0,x1,y1,f,s)=>poly([PW(x0,y0),PW(x1,y0),PW(x1,y1),PW(x0,y1)],f,s);
 function groundCircle(cx,cy,r,f,s){ const pts=[];for(let i=0;i<20;i++){const a=i/20*Math.PI*2;pts.push(PW(cx+Math.cos(a)*r,cy+Math.sin(a)*r))} poly(pts,f,s,1.2); }
 
-/* sglow soporta hex, hsl() y rgb()/rgba() */
+/* sglow: soporta hex, hsl(), rgb()/rgba() */
 function sglow(x,y,col,r,a,ys=.5){
   const c=G.c;
   c.save();
@@ -1617,18 +1617,15 @@ function drawTrainAt(t){
   sglow(fp[0],fp[1],'#ffe080',18*s,'88',1);
 }
 
+/* ============================================================
+   SUPERFICIES HÚMEDAS (LLUVIA) — SOLO EN EL SUELO
+   ============================================================ */
 function drawWetSurfaces(items){
   const c=G.c;
   const alpha = 0.14 + 0.06*Math.sin(animT*2.5);
   items.forEach(it=>{
     const T=TYPES[it.t]; const[w,d]=dims(it);
-    const isBuilding = isBuildKind(T.kind);
     const isGround = ['street','road','xwalk','median','medianx','park','green','parkx'].includes(T.kind);
-    if(isBuilding){
-      const h=it.h||T.h; if(h<.3)return;
-      const p1=PW(it.x,it.y,h+.01),p2=PW(it.x+w,it.y,h+.01),p3=PW(it.x+w,it.y+d,h+.01),p4=PW(it.x,it.y+d,h+.01);
-      poly([p1,p2,p3,p4],`rgba(160,210,255,${alpha})`);
-    }
     if(isGround){
       const gAlpha=alpha*0.7;
       const p1=PW(it.x,it.y,.01),p2=PW(it.x+w,it.y,.01),p3=PW(it.x+w,it.y+d,.01),p4=PW(it.x,it.y+d,.01);
@@ -1636,17 +1633,15 @@ function drawWetSurfaces(items){
     }
   });
 }
+
+/* ============================================================
+   SUPERFICIES NEVADAS — SOLO EN EL SUELO
+   ============================================================ */
 function drawSnowSurfaces(items){
   const c=G.c;
   items.forEach(it=>{
     const T=TYPES[it.t]; const[w,d]=dims(it);
-    const isBuilding = isBuildKind(T.kind);
     const isGround = ['street','road','xwalk','median','medianx','park','green','parkx'].includes(T.kind);
-    if(isBuilding){
-      const h=it.h||T.h; if(h<.3)return;
-      const p1=PW(it.x,it.y,h+.02),p2=PW(it.x+w,it.y,h+.02),p3=PW(it.x+w,it.y+d,h+.02),p4=PW(it.x,it.y+d,h+.02);
-      poly([p1,p2,p3,p4],'rgba(240,246,255,0.9)');
-    }
     if(isGround){
       const p1=PW(it.x,it.y,.02),p2=PW(it.x+w,it.y,.02),p3=PW(it.x+w,it.y+d,.02),p4=PW(it.x,it.y+d,.02);
       poly([p1,p2,p3,p4],'rgba(245,250,255,0.4)');
@@ -1941,8 +1936,6 @@ function fits(t,x,y,rotn,items,fw,fd,excludeIdx=-1){
     return x<o.x+ow&&x+w>o.x&&y<o.y+od&&y+d>o.y;
   });
 }
-
-/* ==== ghostAt: usa ghostCell (ancla persistente) primero ==== */
 function ghostAt(){
   if(!placing)return null;
   const T=TYPES[selType],fw=selFw??T.w,fd=selFd??T.d;
@@ -2020,14 +2013,13 @@ function toHex(c){
   return '#000000';
 }
 
-/* ==== placeGhost: coloca en la posición anclada y limpia ghostCell ==== */
 function placeGhost(){
   const g=ghostAt();
   if(g&&fits(g.t,g.x,g.y,g.rot,cur.items,g.fw,g.fd)){
     cur.items.push({t:g.t,x:g.x,y:g.y,rot:g.rot,h:g.h,fw:g.fw,fd:g.fd,
                     wallMaterial:getMaterial(g,TYPES[g.t]),_t0:Date.now()});
     refreshAnim();
-    ghostCell=null;   // listo para el siguiente
+    ghostCell=null;
     return true;
   }
   return false;
@@ -2079,18 +2071,15 @@ cv.addEventListener('pointerdown',e=>{
       dragCam={x:e.clientX,y:e.clientY,panX:cam.panX,panY:cam.panY,moved:false};
       return;
     }
-    // Touch
     if(ghostArmed){
-      // 2º toque: coloca en la posición del ghostCell (última ubicación arrastrada)
       const ok=placeGhost();
       if(ok) ghostArmed=false;
       draw();
       return;
     }
-    // 1er toque: anclar el fantasma aquí
     outside=false;
     hover=cell;
-    ghostCell=cell;   // <-- ancla persistente
+    ghostCell=cell;
     touchPlaceStart={x:e.clientX,y:e.clientY,moved:false};
     draw();
     return;
@@ -2124,7 +2113,7 @@ cv.addEventListener('pointermove',e=>{
       outside=false;
       const cNow=cellAt(e);
       hover=cNow;
-      ghostCell=cNow;   // <-- el fantasma sigue el dedo y queda anclado aquí
+      ghostCell=cNow;
       draw();
       return;
     }
@@ -2155,11 +2144,10 @@ cv.addEventListener('pointermove',e=>{
       return;
     }
   }
-  // Hover libre (ratón)
   outside=false;
   const cNow=cellAt(e);
   hover=cNow;
-  ghostCell=cNow;   // <-- también lo ancla para el flujo de ratón
+  ghostCell=cNow;
   draw();
 });
 
@@ -2169,7 +2157,6 @@ cv.addEventListener('pointerup',e=>{
   if(pinchStart){ if(activePointers.size<2) pinchStart=null; return; }
 
   if(touchPlaceStart){
-    // El dedo se levanta: el fantasma queda anclado en ghostCell (no lo tocamos)
     touchPlaceStart=null;
     ghostArmed=true;
     draw();
@@ -2199,7 +2186,6 @@ cv.addEventListener('pointercancel',e=>{
 cv.addEventListener('pointerleave',e=>{
   if(activePointers.size>0||dragItem||dragCam||touchPlaceStart)return;
   hover=null;
-  // Solo limpiamos ghostCell si viene del ratón. En touch se conserva el ancla.
   if(e.pointerType==='mouse') ghostCell=null;
   if(placing)draw();
 });
@@ -2236,7 +2222,7 @@ function handleClick(cell){
   }
   if(idx>=0){selectItem(idx);draw();return}
   if(mode=='place'&&placing){
-    ghostCell=cell;   // asegurar que coloca en la celda del clic
+    ghostCell=cell;
     const g=ghostAt();
     if(g&&fits(g.t,g.x,g.y,g.rot,cur.items,g.fw,g.fd)){
       cur.items.push({t:g.t,x:g.x,y:g.y,rot:g.rot,h:g.h,fw:g.fw,fd:g.fd,
@@ -2331,7 +2317,7 @@ function renderPicker(){
       btn.onclick=()=>{
         selType=i;selH=t.h;selFw=null;selFd=null;
         placing=true;mode='place';ghostArmed=false;
-        ghostCell=null;  // <-- reiniciar ancla al cambiar de tipo
+        ghostCell=null;
         hover=null;
         $('tber').classList.remove('on');
         selectItem(-1);
@@ -2434,6 +2420,67 @@ function thumb(items){
   return c.toDataURL('image/png');
 }
 
+/* ============================================================
+   EXPORTACIÓN PNG — EN MÓVIL ESCALA PARA QUE EL LADO
+   MÁS ANGOSTO MIDA 2000 PX
+   ============================================================ */
+function isMobileDevice(){
+  return window.matchMedia('(max-width:820px)').matches
+      || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+}
+
+function exportPNGMobile(sourceCanvas, setupS, setupView, camState, items, outArr){
+  const download = (dataUrl) => {
+    const link = document.createElement('a');
+    link.download = 'diorama-' + Date.now() + '.png';
+    link.href = dataUrl;
+    link.click();
+  };
+
+  if(!isMobileDevice()){
+    // Escritorio: comportamiento clásico (canvas tal cual)
+    try{ download(sourceCanvas.toDataURL('image/png')); }
+    catch(err){ console.warn('Export desktop fail:', err); }
+    return;
+  }
+
+  // Móvil: renderizar a 2000 px en el lado más angosto
+  const sw = sourceCanvas.width || 1;
+  const sh = sourceCanvas.height || 1;
+  const aspect = sw / sh;
+  let W, H;
+  if(sw <= sh){ W = 2000; H = Math.round(2000 / aspect); }
+  else       { H = 2000; W = Math.round(2000 * aspect); }
+
+  // Tope de seguridad para aspectos muy extremos (límites típicos de canvas en móvil)
+  const MAX_DIM = 4096;
+  if(W > MAX_DIM || H > MAX_DIM){
+    const capScale = MAX_DIM / Math.max(W, H);
+    W = Math.round(W * capScale);
+    H = Math.round(H * capScale);
+  }
+
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+
+  const keepG = G, keepNeeds = needsAnim;
+  const scale = W / sw;
+  const outOpts = outArr ? {out: outArr} : {};
+
+  try {
+    setup(c.getContext('2d'), setupS, setupView, camState.zoom,
+          camState.panX * scale, camState.panY * scale);
+    render(items, outOpts);
+    G = keepG; needsAnim = keepNeeds;
+    download(c.toDataURL('image/png'));
+  } catch(err){
+    console.warn('Export high-res falló, usando canvas actual:', err);
+    G = keepG; needsAnim = keepNeeds;
+    try{ download(sourceCanvas.toDataURL('image/png')); }
+    catch(e2){ console.warn('Export fallback fail:', e2); }
+  }
+}
+
 $('bsave').onclick=()=>{
   if(!cur.items.length){alert('Agrega algunos edificios antes de generar el diorama.');return}
   const d={id:cur.id||Date.now(),name:$('nm').value.trim()||'Diorama '+(lib.length+1),items:JSON.parse(JSON.stringify(cur.items)),th:thumb(cur.items)};
@@ -2441,12 +2488,11 @@ $('bsave').onclick=()=>{
   if(i<0){lib.push(d);cur.id=d.id}else{lib[i]=d}
   persist();all();showSaveToast();
 };
+
 $('bdl1').onclick=()=>{
-  const link=document.createElement('a');
-  link.download='diorama-'+Date.now()+'.png';
-  link.href=cv.toDataURL('image/png');
-  link.click();
+  exportPNGMobile(cv, 12, view, cam, cur.items, null);
 };
+
 $('bload').onclick=()=>openLoad();
 $('bnew').onclick=()=>{
   if(cur.items.length>0 && !confirm('⚠ Si no has guardado el diorama actual, se perderá. ¿Crear un nuevo diorama?'))return;
@@ -2509,13 +2555,19 @@ function cards(host,pick){
   });
 }
 
-function drawC(){
+/* --------- UNIR: preparar items y out --------- */
+function computeUnionItems(){
   const out=[],items=[];
   slots.forEach((id,i)=>{
     const d=lib.find(o=>o.id==id);if(!d)return;
     const ox=(i%3)*12,oy=Math.floor(i/3)*12;out.push([ox,oy]);
     d.items.forEach(o=>items.push({t:o.t,x:o.x+ox,y:o.y+oy,rot:o.rot,h:o.h,fw:o.fw,fd:o.fd,label:o.label,neon:o.neon,wall:o.wall,roof:o.roof,ledCol:o.ledCol,roofLights:o.roofLights,roofLightsCol:o.roofLightsCol,signMode:o.signMode,roadColor:o.roadColor,wallMaterial:o.wallMaterial,_t0:o._t0}));
   });
+  return {out,items};
+}
+
+function drawC(){
+  const {out,items}=computeUnionItems();
   resizeCanvas(cx2);
   setup(cx2.getContext('2d'),36,cview,cam2.zoom,cam2.panX,cam2.panY);
   render(items,{out});
@@ -2535,11 +2587,10 @@ function slotUI(){
     h.appendChild(e);
   });
 }
+
 $('bdl2').onclick=()=>{
-  const link=document.createElement('a');
-  link.download='diorama-union-'+Date.now()+'.png';
-  link.href=cx2.toDataURL('image/png');
-  link.click();
+  const {out,items}=computeUnionItems();
+  exportPNGMobile(cx2, 36, cview, cam2, items, out);
 };
 
 let drag2=null;
